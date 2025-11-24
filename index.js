@@ -31,6 +31,7 @@ async function run() {
     //collection;
     const zepShiftDB = client.db("ZepShit");
     const userCollection = zepShiftDB.collection("users");
+    const parcelCollection = zepShiftDB.collection("parcels");
 
     app.post("/users", async (req, res) => {
       const newUser = req.body;
@@ -39,10 +40,26 @@ async function run() {
       if (existUser) {
         return res.send({ message: "user already Exist" });
       }
-
       const result = await userCollection.insertOne(newUser);
       res.send(result);
     });
+
+    //parcels api
+    app.post("/parcels", async (req, res) => {
+      const newParcel = { ...req.body, createdAt: new Date() };
+      const result = await parcelCollection.insertOne(newParcel);
+      res.send(result);
+    });
+    app.get('/parcels', async (req, res) => {
+      const query = {};
+      const {email} = req.query;
+      if (email) {
+        query.senderEmail=email
+      }
+      const cursor =  parcelCollection.find(query);
+      const result = await cursor.toArray();
+      res.send(result)
+    })
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
