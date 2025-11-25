@@ -3,6 +3,11 @@ const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 
+const stripe = require("stripe")(process.env.STRIPE_SECRET, {
+  apiVersion: "2025-11-17.clover",
+});
+
+const MY_DOMAIN = process.env.PAYMENT_DOMAIN;
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -74,7 +79,37 @@ async function run() {
       const cursor = await parcelCollection.deleteOne(query);
       res.send(cursor);
     });
+    app.post("/create-checkout-session", async (req, res) => {
+      try {
+        const { price } = req.body; // dynamic amount from frontend
 
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ["card"],
+          mode: "payment",
+
+          line_items: [
+            {
+              price_data: {
+                currency: "usd",
+                product_data: {
+                  name: "Parcel Payment",
+                },
+                unit_amount: price * 100, // amount in cents
+              },
+              quantity: 1,
+            },
+          ],
+
+          success_url: `${MY_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${MY_DOMAIN}/payment-cancel`,
+        });
+
+        res.send({ url: session.url });
+      } catch (error) {
+        console.log(error);
+        res.status(500).json({ error: error.message });
+      }
+    });
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
