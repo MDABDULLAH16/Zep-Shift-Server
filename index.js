@@ -23,7 +23,15 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+function generateTrackingId() {
+  const prefix = "ZEP";
 
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, ""); // YYYYMMDD
+
+  const random = Math.random().toString(36).substring(2, 8).toUpperCase(); // 6 chars
+
+  return `${prefix}-${date}-${random}`;
+}
 app.get("/", (req, res) => {
   res.send("Welcome to Zep-Shift!");
 });
@@ -37,6 +45,7 @@ async function run() {
     const zepShiftDB = client.db("ZepShit");
     const userCollection = zepShiftDB.collection("users");
     const parcelCollection = zepShiftDB.collection("parcels");
+    const paymentCollection = zepShiftDB.collection("payments");
 
     app.post("/users", async (req, res) => {
       const newUser = req.body;
@@ -81,18 +90,22 @@ async function run() {
     });
     app.post("/create-checkout-session", async (req, res) => {
       try {
-        const { price } = req.body; // dynamic amount from frontend
+        const { parcelId, price, email, parcelName } = req.body;
 
         const session = await stripe.checkout.sessions.create({
           payment_method_types: ["card"],
           mode: "payment",
-
+          customer_email: email,
+          metadata: {
+            parcelId,
+            parcelName,
+          },
           line_items: [
             {
               price_data: {
                 currency: "usd",
                 product_data: {
-                  name: "Parcel Payment",
+                  name: parcelName,
                 },
                 unit_amount: price * 100, // amount in cents
               },
@@ -100,14 +113,61 @@ async function run() {
             },
           ],
 
-          success_url: `${MY_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${MY_DOMAIN}/payment-cancel`,
+          success_url: `${MY_DOMAIN}/dashboard/paymentSuccess?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${MY_DOMAIN}/dashboard/paymentCancelled`,
         });
 
         res.send({ url: session.url });
       } catch (error) {
         console.log(error);
         res.status(500).json({ error: error.message });
+      }
+    });
+    app.patch("/payment-success", async (req, res) => {
+      const sessionId = req.query.session_id;
+      const trackingId = generateTrackingId();
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      const transactionId = session.payment_intent;
+      const query = { transactionId: transactionId };
+      const existPayment = await paymentCollection.findOne(query);
+      if (existPayment) {
+        return res.send({
+          message: "payment already done!",
+          transactionId,
+          trackingId: existPayment.trackingId,
+        });
+      }
+      if (session.payment_status === "paid") {
+        const pId = session.metadata.parcelId;
+        const query = { _id: new ObjectId(pId) };
+        const update = {
+          $set: {
+            paymentStatus: "paid",
+            trackingId: trackingId,
+          },
+        };
+        const result = await parcelCollection.updateOne(query, update);
+
+        const payment = {
+          amount: session.amount_total / 100,
+          currency: session.currency,
+          customerEmail: session.customer_email,
+          parcelId: session.metadata.parcelId,
+          transactionId: session.payment_intent,
+          paymentStatus: session.payment_status,
+          paidAt: new Date(),
+          trackingId: trackingId,
+        };
+        if (session.payment_status === "paid") {
+          const paymentResult = await paymentCollection.insertOne(payment);
+          res.send({
+            success: true,
+            paymentInfo: paymentResult,
+            trackingId,
+            modifyParcels: result,
+            transactionId: session.payment_intent,
+          });
+        }
       }
     });
     // Send a ping to confirm a successful connection
