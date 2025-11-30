@@ -2,7 +2,6 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
-
 const stripe = require("stripe")(process.env.STRIPE_SECRET, {
   apiVersion: "2025-11-17.clover",
 });
@@ -10,6 +9,9 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET, {
 const MY_DOMAIN = process.env.PAYMENT_DOMAIN;
 const app = express();
 const port = process.env.PORT || 3000;
+
+const admin = require("firebase-admin");
+const serviceAccount = require("./zep-shift-af645-firebase-admin.json");
 
 app.use(cors());
 app.use(express.json());
@@ -32,6 +34,27 @@ function generateTrackingId() {
 
   return `${prefix}-${date}-${random}`;
 }
+
+// firebase admin verification
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+const verifyFBToken = async (req, res, next) => {
+  const token = req.headers?.authorization;
+  if (!token) {
+    res.status(401).send({ message: "Unauthorized access" });
+  }
+  try {
+    const idToken = token.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    req.decoded_email = decoded.email;
+    next();
+  } catch (error) {
+  return res.status(401).send({message:"unauthorized access"})
+  }
+};
+
 app.get("/", (req, res) => {
   res.send("Welcome to Zep-Shift!");
 });
@@ -46,9 +69,13 @@ async function run() {
     const userCollection = zepShiftDB.collection("users");
     const parcelCollection = zepShiftDB.collection("parcels");
     const paymentCollection = zepShiftDB.collection("payments");
+    const ridersCollection = zepShiftDB.collection('riders')
+
 
     app.post("/users", async (req, res) => {
       const newUser = req.body;
+      newUser.createdAt = new Date();
+      newUser.role = 'user';
       const query = { email: newUser.email };
       const existUser = await userCollection.findOne(query);
       if (existUser) {
@@ -170,6 +197,65 @@ async function run() {
         }
       }
     });
+    //payment history api
+    app.get("/payments", verifyFBToken, async (req, res) => {
+      const email = req.query.email;
+      console.log(req.headers);
+
+      const query = {};
+      if (email) {
+        query.customerEmail = email;
+        
+        //check the decoded email== jar jar data sei sei pabe
+        if (email !==req.decoded_email) {
+          res.status(403).send({ message: 'forbidden access' });
+        }
+      }
+      const cursor = paymentCollection.find(query).sort({
+        paidAt:-1});
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+    //riders apis;
+    app.post('/riders', async (req, res) => {
+      const rider = req.body;
+      rider.status = 'pending';
+      rider.createdAt = new Date();
+      const result = await ridersCollection.insertOne(rider);
+      res.send(result);
+    })
+    app.get('/riders', async (req, res) => {
+      // const email = req.query.email;
+      const query = {}
+      if (query.status) {
+        query.status = query.status;
+      }
+      const cursor = ridersCollection.find(query);
+      const result = await cursor.toArray();
+      res.send(result)
+    })
+    app.patch('/riders/:id',verifyFBToken, async (req, res) => {
+      const status = req.body.status;
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };      
+      const updateDoc = {
+        $set: {
+          status:status
+        }
+      }
+      const result = await ridersCollection.updateOne(query, updateDoc);
+      if (status === 'approved') {
+        const email = req.body.email;
+        const userQuery = { email }
+        const updateRole = {
+          $set: {
+            role: "rider",
+          },
+        };
+        const result = await userCollection.updateOne(userQuery,updateRole);
+      }
+      res.send(result);
+    })
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
