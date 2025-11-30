@@ -71,6 +71,15 @@ async function run() {
     const paymentCollection = zepShiftDB.collection("payments");
     const ridersCollection = zepShiftDB.collection("riders");
 
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded_email;
+      const user = await userCollection.findOne({ email });
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
+
     app.post("/users", async (req, res) => {
       const newUser = req.body;
       newUser.createdAt = new Date();
@@ -88,19 +97,32 @@ async function run() {
       const result = await cursor.toArray();
       res.send(result);
     });
-    app.patch("/users/:id", async (req, res) => {
-      const id = req.params.id;
-      const  roleInfo  = req.body;
-      const query = { _id: new ObjectId(id) };
-      const updateDoc = {
-        $set: {
-          role: roleInfo.role,
-        },
-      };
-      const result = await userCollection.updateOne(query, updateDoc);
-      res.send(result);
-    });
+    app.patch(
+      "/users/:id/role",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const roleInfo = req.body;
+        const query = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            role: roleInfo.role,
+          },
+        };
+        const result = await userCollection.updateOne(query, updateDoc);
+        res.send(result);
+      }
+    );
+    app.get("/users/:id");
+    app.get("/users/:email/role", async (req, res) => {
+      const email = req.params.email;
+      const query = { email };
+      const result = await userCollection.findOne(query);
+      console.log(result);
 
+      res.send({ role: result.role || "user" });
+    });
     //parcels api
     app.post("/parcels", async (req, res) => {
       const newParcel = { ...req.body, createdAt: new Date() };
@@ -251,7 +273,7 @@ async function run() {
       const result = await cursor.toArray();
       res.send(result);
     });
-    app.patch("/riders/:id", verifyFBToken, async (req, res) => {
+    app.patch("/riders/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       const status = req.body.status;
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
