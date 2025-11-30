@@ -93,7 +93,20 @@ async function run() {
       res.send(result);
     });
     app.get("/users", async (req, res) => {
-      const cursor = userCollection.find();
+      let searchText = req.query.searchText;
+      let query = {};
+      if (searchText) {
+        query = {
+          $or: [
+            { email: { $regex: searchText, $options: "i" } },
+            { name: { $regex: searchText, $options: "i" } },
+          ],
+        };
+      }
+      const cursor = userCollection
+        .find(query)
+        .sort({ createdAt: -1 })
+        .limit(5);
       const result = await cursor.toArray();
       res.send(result);
     });
@@ -119,8 +132,6 @@ async function run() {
       const email = req.params.email;
       const query = { email };
       const result = await userCollection.findOne(query);
-      console.log(result);
-
       res.send({ role: result.role || "user" });
     });
     //parcels api
