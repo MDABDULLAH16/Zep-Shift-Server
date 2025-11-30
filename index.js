@@ -51,7 +51,7 @@ const verifyFBToken = async (req, res, next) => {
     req.decoded_email = decoded.email;
     next();
   } catch (error) {
-  return res.status(401).send({message:"unauthorized access"})
+    return res.status(401).send({ message: "unauthorized access" });
   }
 };
 
@@ -69,19 +69,35 @@ async function run() {
     const userCollection = zepShiftDB.collection("users");
     const parcelCollection = zepShiftDB.collection("parcels");
     const paymentCollection = zepShiftDB.collection("payments");
-    const ridersCollection = zepShiftDB.collection('riders')
-
+    const ridersCollection = zepShiftDB.collection("riders");
 
     app.post("/users", async (req, res) => {
       const newUser = req.body;
       newUser.createdAt = new Date();
-      newUser.role = 'user';
+      newUser.role = "user";
       const query = { email: newUser.email };
       const existUser = await userCollection.findOne(query);
       if (existUser) {
         return res.send({ message: "user already Exist" });
       }
       const result = await userCollection.insertOne(newUser);
+      res.send(result);
+    });
+    app.get("/users", async (req, res) => {
+      const cursor = userCollection.find();
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+    app.patch("/users/:id", async (req, res) => {
+      const id = req.params.id;
+      const  roleInfo  = req.body;
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: {
+          role: roleInfo.role,
+        },
+      };
+      const result = await userCollection.updateOne(query, updateDoc);
       res.send(result);
     });
 
@@ -205,63 +221,64 @@ async function run() {
       const query = {};
       if (email) {
         query.customerEmail = email;
-        
+
         //check the decoded email== jar jar data sei sei pabe
-        if (email !==req.decoded_email) {
-          res.status(403).send({ message: 'forbidden access' });
+        if (email !== req.decoded_email) {
+          res.status(403).send({ message: "forbidden access" });
         }
       }
       const cursor = paymentCollection.find(query).sort({
-        paidAt:-1});
+        paidAt: -1,
+      });
       const result = await cursor.toArray();
       res.send(result);
     });
     //riders apis;
-    app.post('/riders', async (req, res) => {
+    app.post("/riders", async (req, res) => {
       const rider = req.body;
-      rider.status = 'pending';
+      rider.status = "pending";
       rider.createdAt = new Date();
       const result = await ridersCollection.insertOne(rider);
       res.send(result);
-    })
-    app.get('/riders', async (req, res) => {
+    });
+    app.get("/riders", async (req, res) => {
       // const email = req.query.email;
-      const query = {}
+      const query = {};
       if (query.status) {
         query.status = query.status;
       }
       const cursor = ridersCollection.find(query);
       const result = await cursor.toArray();
-      res.send(result)
-    })
-    app.patch('/riders/:id',verifyFBToken, async (req, res) => {
+      res.send(result);
+    });
+    app.patch("/riders/:id", verifyFBToken, async (req, res) => {
       const status = req.body.status;
       const id = req.params.id;
-      const query = { _id: new ObjectId(id) };      
+      const query = { _id: new ObjectId(id) };
       const updateDoc = {
         $set: {
-          status:status
-        }
-      }
+          status: status,
+        },
+      };
       const result = await ridersCollection.updateOne(query, updateDoc);
-      if (status === 'approved') {
+      if (status === "approved") {
         const email = req.body.email;
-        const userQuery = { email }
+        const userQuery = { email };
         const updateRole = {
           $set: {
             role: "rider",
           },
         };
-        const result = await userCollection.updateOne(userQuery,updateRole);
+        const result = await userCollection.updateOne(userQuery, updateRole);
       }
       res.send(result);
-    })
-    app.delete('/riders/:id', async (req, res) => {
+    });
+    app.delete("/riders/:id", async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await ridersCollection.deleteOne(query);
-      res.send(result)
-    })
+      res.send(result);
+    });
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
